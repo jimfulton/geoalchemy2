@@ -51,7 +51,7 @@ Reference
 """
 import re
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, bindparam
 from sqlalchemy.sql import functions
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.ext.compiler import compiles
@@ -183,7 +183,9 @@ class GenericFunction(with_metaclass(_GenericMeta, functions.GenericFunction)):
         args = list(args)
         if expr is not None:
             args = [expr] + args
-        for idx, elem in enumerate(args):
+
+        argument_types = getattr(self, 'argument_types', (None,) * len(args))
+        for idx, (elem, type_) in enumerate(zip(args, argument_types)):
             if isinstance(elem, elements.HasFunction):
                 if elem.extended:
                     func_name = elem.geom_from_extended_version
@@ -192,6 +194,10 @@ class GenericFunction(with_metaclass(_GenericMeta, functions.GenericFunction)):
                     func_name = elem.geom_from
                     func_args = [elem.data, elem.srid]
                 args[idx] = getattr(functions.func, func_name)(*func_args)
+            elif type_ is not None:
+                args[idx] = bindparam(
+                    f"{self.name}_{idx}", value=args[idx], type_=type_, unique=True,
+                )
         functions.GenericFunction.__init__(self, *args, **kwargs)
 
 
@@ -206,6 +212,10 @@ for name, type_, doc in _FUNCTIONS:
     elif doc is not None:
         docs.append(doc)
         docs.append('see http://postgis.net/docs/{0}.html'.format(name))
+
+    if isinstance(type_, tuple):
+        argument_types, type_ = type_
+        attributes['argument_types'] = argument_types
 
     if type_ is not None:
         attributes['type'] = type_
